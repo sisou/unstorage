@@ -239,12 +239,11 @@ const driver: DriverFactory<NodeRedisOptions, Promise<NodeRedisClient>> = (opts)
         : client.unlink(keys));
     },
     async dispose() {
-      if (!redisClient) {
-        return;
-      }
-      // A failed connection has nothing to close
-      const client = await redisClient.catch(() => undefined);
+      const pending = redisClient;
+      // Clear first, so that calls made while disposing do not get the closing client
       redisClient = bufferClient = undefined;
+      // A failed connection has nothing to close
+      const client = await pending?.catch(() => undefined);
       if (client?.isOpen) {
         await client.close();
       }

@@ -122,7 +122,12 @@ describe("drivers: node-redis (connection failures)", () => {
           close: vi.fn(async () => {
             client.isOpen = false;
           }),
-          get: vi.fn(async () => "value"),
+          get: vi.fn(async () => {
+            if (!client.isOpen) {
+              throw new Error("The client is closed");
+            }
+            return "value";
+          }),
         };
         clients.push(client);
         return client;
@@ -151,5 +156,20 @@ describe("drivers: node-redis (connection failures)", () => {
 
     await expect(driver.getItem("key", {})).rejects.toThrow("ECONNREFUSED");
     await expect(driver.dispose!()).resolves.toBeUndefined();
+  });
+
+  it("does not hand out the closing client while disposing", async () => {
+    const { lib, clients } = createFakeLib();
+    const driver = nodeRedisDriver({ lib: lib as any });
+    await expect(driver.getItem("key", {})).rejects.toThrow("ECONNREFUSED");
+    expect(await driver.getItem("key", {})).toBe("value");
+
+    const disposing = driver.dispose!();
+    expect(await driver.getItem("key", {})).toBe("value");
+    await disposing;
+
+    expect(clients[1]!.isOpen).toBe(false);
+    expect(clients[2]!.isOpen).toBe(true);
+    await driver.dispose!();
   });
 });
