@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createClient, RESP_TYPES } from "redis";
+import { createClient, RESP_TYPES, type RedisClientType } from "redis";
 import nodeRedisDriver from "../../src/drivers/node-redis.ts";
 import { testDriver } from "./utils.ts";
 
@@ -9,7 +9,7 @@ const url = process.env.VITE_REDIS_URL;
 describe.skipIf(!url)("drivers: node-redis", () => {
   const base = `test-${Math.round(Math.random() * 1_000_000).toString(16)}`;
 
-  const withClient = async <T>(fn: (client: ReturnType<typeof createClient>) => Promise<T>) => {
+  const withClient = async <T>(fn: (client: RedisClientType) => Promise<T>) => {
     const client = createClient({ url });
     await client.connect();
     try {
