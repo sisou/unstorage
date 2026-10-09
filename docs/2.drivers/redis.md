@@ -78,3 +78,64 @@ See [ioredis](https://github.com/redis/ioredis/blob/master/API.md#new-redisport-
 **Transaction options:**
 
 - `ttl`: Supported for `setItem(key, value, { ttl: number /* seconds */ })`
+
+## node-redis
+
+**Driver name:** `node-redis`
+
+::note
+This driver uses the official [`redis`](https://github.com/redis/node-redis) client (also known as `node-redis`, v5 or later) instead of `ioredis`.
+::
+
+To use it, you will need to install `redis` in your project:
+
+:pm-install{name="redis"}
+
+Usage with single Redis instance:
+
+```ts
+import { createStorage } from "unstorage";
+import nodeRedisDriver from "unstorage/drivers/node-redis";
+
+const storage = createStorage({
+  driver: nodeRedisDriver({
+    base: "unstorage",
+    url: "rediss://REDIS_USER:REDIS_PASSWORD@HOSTNAME:6380",
+  }),
+});
+```
+
+Usage with a Redis cluster:
+
+Unlike the `redis` driver, multi-key operations (`getItems`, `setItems`, `clear`) are split into per-key commands in cluster mode, and `getKeys` scans all master nodes, so keys do not need to share a hashslot.
+
+```ts
+const storage = createStorage({
+  driver: nodeRedisDriver({
+    base: "unstorage",
+    cluster: {
+      rootNodes: [{ url: "redis://HOSTNAME:6380" }],
+      defaults: {
+        password: "REDIS_PASSWORD",
+        socket: { tls: true },
+      },
+    },
+  }),
+});
+```
+
+**Options:**
+
+- `base`: Optional prefix to use for all keys. Can be used for namespacing.
+- `url`: Url to use for connecting to redis. Has the format `redis[s]://[[username][:password]@][host][:port][/db-number]`
+- `cluster`: Options to use for cluster mode (passed to [`createCluster`](https://github.com/redis/node-redis/blob/master/docs/clustering.md)). Takes precedence over `url` and other client options.
+- `ttl`: Default TTL for all items in **seconds**.
+- `scanCount`: How many keys to scan at once ([redis documentation](https://redis.io/docs/latest/commands/scan/#the-count-option)).
+- `preConnect`: Whether to initialize the redis instance immediately. Otherwise, it will be initialized on the first read/write call. Default: `false`.
+- `lib`: Optionally provide the `redis` library (or a function returning it) to avoid dynamically importing it.
+
+All other options are passed to [`createClient`](https://github.com/redis/node-redis/blob/master/docs/client-configuration.md).
+
+**Transaction options:**
+
+- `ttl`: Supported for `setItem(key, value, { ttl: number /* seconds */ })`
