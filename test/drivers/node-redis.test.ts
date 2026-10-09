@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createClient, RESP_TYPES, type RedisClientType } from "redis";
 import nodeRedisDriver from "../../src/drivers/node-redis.ts";
 import { testDriver } from "./utils.ts";
@@ -96,5 +96,60 @@ describe.skipIf(!clusterUrls)("drivers: node-redis (cluster)", () => {
         expect(await ctx.storage.getKeys("s9")).toEqual([]);
       });
     },
+  });
+});
+
+describe("drivers: node-redis (connection failures)", () => {
+  // Fake `redis` library whose first client fails to connect
+  const createFakeLib = () => {
+    const clients: { connect: () => Promise<void>; destroy: () => void; isOpen: boolean }[] = [];
+    const lib = {
+      RESP_TYPES: { BLOB_STRING: 36 },
+      createClient: vi.fn(() => {
+        const failing = clients.length === 0;
+        const client = {
+          isOpen: false,
+          on: () => client,
+          connect: vi.fn(async () => {
+            client.isOpen = true;
+            if (failing) {
+              throw new Error("ECONNREFUSED");
+            }
+          }),
+          destroy: vi.fn(() => {
+            client.isOpen = false;
+          }),
+          close: vi.fn(async () => {
+            client.isOpen = false;
+          }),
+          get: vi.fn(async () => "value"),
+        };
+        clients.push(client);
+        return client;
+      }),
+    };
+    return { lib, clients };
+  };
+
+  it("retries after a failed connection", async () => {
+    const { lib, clients } = createFakeLib();
+    const driver = nodeRedisDriver({ lib: lib as any });
+
+    await expect(driver.getItem("key", {})).rejects.toThrow("ECONNREFUSED");
+    expect(clients[0]!.destroy).toHaveBeenCalled();
+
+    expect(await driver.getItem("key", {})).toBe("value");
+    expect(lib.createClient).toHaveBeenCalledTimes(2);
+
+    await driver.dispose!();
+    expect(clients[1]!.isOpen).toBe(false);
+  });
+
+  it("disposes without throwing after a failed connection", async () => {
+    const { lib } = createFakeLib();
+    const driver = nodeRedisDriver({ lib: lib as any });
+
+    await expect(driver.getItem("key", {})).rejects.toThrow("ECONNREFUSED");
+    await expect(driver.dispose!()).resolves.toBeUndefined();
   });
 });

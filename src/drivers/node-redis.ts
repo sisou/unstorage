@@ -67,28 +67,48 @@ type NodeRedisClient = RedisClientType | RedisClusterType;
 
 const driver: DriverFactory<NodeRedisOptions, Promise<NodeRedisClient>> = (opts) => {
   let redisClient: Promise<NodeRedisClient> | undefined;
-  const getRedisClient = () =>
-    (redisClient ??= (async () => {
-      const lib = await importLib(DRIVER_NAME, "redis", opts.lib);
-      const {
-        base: _base,
-        cluster,
-        ttl: _ttl,
-        scanCount: _scanCount,
-        preConnect: _preConnect,
-        lib: _lib,
-        ...clientOptions
-      } = opts;
-      const client = (
-        cluster ? lib.createCluster(cluster) : lib.createClient(clientOptions)
-      ) as NodeRedisClient;
-      // node-redis throws on `error` events without a listener (e.g. while reconnecting)
-      client.on("error", (error: unknown) => {
-        console.error(`[unstorage] [${DRIVER_NAME}]`, error);
+  const getRedisClient = () => {
+    if (!redisClient) {
+      const promise = (redisClient = connect());
+      // Do not remember a failed connection, so that the next call retries
+      promise.catch(() => {
+        if (redisClient === promise) {
+          redisClient = bufferClient = undefined;
+        }
       });
+    }
+    return redisClient;
+  };
+
+  const connect = async (): Promise<NodeRedisClient> => {
+    const lib = await importLib(DRIVER_NAME, "redis", opts.lib);
+    const {
+      base: _base,
+      cluster,
+      ttl: _ttl,
+      scanCount: _scanCount,
+      preConnect: _preConnect,
+      lib: _lib,
+      ...clientOptions
+    } = opts;
+    const client = (
+      cluster ? lib.createCluster(cluster) : lib.createClient(clientOptions)
+    ) as NodeRedisClient;
+    // node-redis throws on `error` events without a listener (e.g. while reconnecting)
+    client.on("error", (error: unknown) => {
+      console.error(`[unstorage] [${DRIVER_NAME}]`, error);
+    });
+    try {
       await client.connect();
-      return client;
-    })());
+    } catch (error) {
+      // Stop any pending reconnection attempts of the abandoned client
+      if (client.isOpen) {
+        client.destroy();
+      }
+      throw error;
+    }
+    return client;
+  };
 
   // Client returning `Buffer`s instead of strings for (binary) raw values
   let bufferClient: Promise<NodeRedisClient> | undefined;
@@ -222,9 +242,10 @@ const driver: DriverFactory<NodeRedisOptions, Promise<NodeRedisClient>> = (opts)
       if (!redisClient) {
         return;
       }
-      const client = await redisClient;
+      // A failed connection has nothing to close
+      const client = await redisClient.catch(() => undefined);
       redisClient = bufferClient = undefined;
-      if (client.isOpen) {
+      if (client?.isOpen) {
         await client.close();
       }
     },
